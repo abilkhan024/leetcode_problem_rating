@@ -73,7 +73,7 @@
         style="width: 90%"
         :table-layout="'auto'"
         @sort-change="sortChange"
-        :default-sort="{ prop: 'ID', order: 'descending' }"
+        :default-sort="sortInfo"
       >
         <el-table-column prop="ID" label="ID" width="180" sortable="custom" />
         <el-table-column :label="$t('problemName')">
@@ -129,6 +129,29 @@ import { reactive, onMounted, ref } from "vue";
 import axios, { AxiosResponse } from "axios";
 import { ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
+
+const router = useRouter();
+
+function parseQueryParam(key: string) {
+  const rawValue = router.currentRoute.value.query[key];
+  if (!rawValue || typeof rawValue !== "string") {
+    return null;
+  }
+  return rawValue;
+}
+
+function parseQueryParamInt(key: string) {
+  const rawValue = parseQueryParam(key);
+  if (!rawValue) {
+    return null;
+  }
+  const value = parseInt(rawValue);
+  if (isNaN(value)) {
+    return null;
+  }
+  return value;
+}
 
 const url = "./data.json";
 
@@ -152,22 +175,29 @@ interface SortInfo {
   order: string;
 }
 
+const defaultParams = {
+  sortProp: "ID",
+  sortOrder: "descending",
+  currentPage: 1,
+};
 let i18n = useI18n();
 let locale = i18n.locale;
-let left = ref(null);
-let right = ref(null);
+let left = ref(parseQueryParamInt("left"));
+let right = ref(parseQueryParamInt("right"));
 let sortInfo = reactive({
-  prop: "ID",
-  order: "descending",
+  prop: parseQueryParam("sortProp") ?? defaultParams.sortProp,
+  order: parseQueryParam("sortOrder") ?? defaultParams.sortOrder,
 } as SortInfo);
 const pageSizeCache = localStorage.getItem("pageSize");
 let pageSize = ref(pageSizeCache ? parseInt(pageSizeCache) : 15);
-let contestIndex = ref(null);
+let contestIndex = ref(parseQueryParamInt("contestIndex"));
 const problemSetAll: Array<Problem> = reactive([]);
 const problemSetShow: Array<Problem> = reactive([]);
 const filterProblemSet: Array<Problem> = reactive([]);
-let keyword = ref("");
-let currentPage = ref(1);
+let keyword = ref(parseQueryParam("keyword") ?? "");
+let currentPage = ref(
+  parseQueryParamInt("currentPage") ?? defaultParams.currentPage
+);
 onMounted(() => {
   axios.get(url).then((res: AxiosResponse<Array<Problem>>) => {
     const problems = res.data;
@@ -179,7 +209,7 @@ onMounted(() => {
       problemSetAll.push(item);
       filterProblemSet.push(item);
     });
-    query();
+    query(true);
   });
 });
 
@@ -203,7 +233,29 @@ function formatNumber(rating: number) {
   return Math.round(rating);
 }
 
+function getQueryValue(value: any, defaultValue?: string | number) {
+  if (value === defaultValue) {
+    return undefined;
+  }
+  return value || undefined;
+}
+
+function syncQueryParams() {
+  router.push({
+    query: {
+      currentPage: getQueryValue(currentPage.value, defaultParams.currentPage),
+      sortProp: getQueryValue(sortInfo.prop, defaultParams.sortProp),
+      sortOrder: getQueryValue(sortInfo.order, defaultParams.sortOrder),
+      left: getQueryValue(left.value),
+      right: getQueryValue(right.value),
+      contestIndex: getQueryValue(contestIndex.value),
+      keyword: getQueryValue(keyword.value),
+    },
+  });
+}
+
 function currentChange() {
+  syncQueryParams();
   problemSetShow.length = 0;
   let no = currentPage.value;
   let size = pageSize.value;
@@ -219,7 +271,7 @@ function sizeChange() {
   currentChange();
 }
 
-function query() {
+function query(initial = false) {
   if (left.value != null && right.value != null && right.value < left.value) {
     ElMessage.error({
       message: "left must less than right",
@@ -261,7 +313,12 @@ function query() {
       return a[sortInfo.prop] - b[sortInfo.prop];
     }
   });
-  sizeChange();
+  syncQueryParams();
+  if (initial === true) {
+    currentChange();
+  } else {
+    sizeChange();
+  }
 }
 
 function reset() {
